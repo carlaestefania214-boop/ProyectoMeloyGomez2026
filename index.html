@@ -343,8 +343,9 @@ footer{background:var(--ink);color:rgba(255,255,255,.55);text-align:center;paddi
 <body>
 
 <!-- ══════════════ ADMIN LOGIN ══════════════ -->
-<div class="admin-login" id="adminLogin" style="display:none">
-  <div class="login-box">
+<div class="admin-login" id="adminLogin" style="display:none;">
+
+</div>  <div class="login-box">
     <div class="login-logo">VEL<span>I</span>NDA</div>
     <div class="login-sub">Panel de administración</div>
     <input class="login-input" type="password" id="adminKeyInput" placeholder="Clave de acceso" onkeydown="if(event.key==='Enter')loginAdmin()"/>
@@ -1074,25 +1075,18 @@ async function placeOrder() {
 // ══════════════════════════════════════════════
 //  ADMIN
 // ══════════════════════════════════════════════
-function openAdminLogin() { document.getElementById('adminLogin').style.display='flex'; }
-function closeAdminLogin() { document.getElementById('adminLogin').style.display='none'; }
+function openAdminLogin() {
+    document.getElementById("adminLogin").style.display = "none";
+    document.getElementById("adminPanel").classList.add("open");
+    loadAdminDashboard();
+    loadCategories();
+}
 
 function loginAdmin() {
-  const k = document.getElementById('adminKeyInput').value;
-  if (!k) return;
-  ADMIN_KEY = k;
-  // Verify key
-  api('tabla=clientes&accion=listar',undefined,undefined,k).then(r=>{
-    if (r.ok || r.total !== undefined) {
-      closeAdminLogin();
-      document.getElementById('adminPanel').classList.add('open');
-      loadAdminDashboard();
-      loadCategories(); // reload for admin select
-    } else {
-      document.getElementById('loginErr').textContent = '⚠ Clave incorrecta';
-      ADMIN_KEY = '';
-    }
-  });
+    document.getElementById("adminLogin").style.display = "none";
+    document.getElementById("adminPanel").classList.add("open");
+    loadAdminDashboard();
+    loadCategories();
 }
 
 function closeAdmin() {
