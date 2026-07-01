@@ -15,15 +15,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit;
 }
 
-// ── CONFIG ─────────────────────────────────────────────────
+// ── CONFIG ────────────────────────────────────────────────
 define('DB_HOST', 'localhost');
 define('DB_NAME', 'icei_42091155');
 define('DB_USER', 'icei_42091155');
 define('DB_PASS', 'velinda12345');
 
-// ── CONEXIÓN ──────────────────────────────────────────────
+// ── CONEXIÓN ─────────────────────────────────────────────
 function db(): PDO {
     static $pdo = null;
+
     if (!$pdo) {
         try {
             $pdo = new PDO(
@@ -37,199 +38,194 @@ function db(): PDO {
                 ]
             );
         } catch (PDOException $e) {
-            out(false, 'Error de conexión: ' . $e->getMessage(), null, 500);
+            out(false, "Error DB: " . $e->getMessage(), null, 500);
             exit;
         }
     }
+
     return $pdo;
 }
 
-// ── RESPUESTA ─────────────────────────────────────────────
+// ── RESPUESTA JSON ───────────────────────────────────────
 function out(bool $ok, string $msg = '', $data = null, int $code = 200): void {
     http_response_code($code);
-    $r = ['ok' => $ok, 'mensaje' => $msg];
+
+    $r = [
+        "ok" => $ok,
+        "mensaje" => $msg
+    ];
 
     if ($data !== null) {
-        if (is_array($data) && isset($data[0])) {
-            $r['total'] = count($data);
-            $r['data'] = $data;
-        } else {
-            $r['data'] = $data;
-        }
+        $r["data"] = $data;
     }
 
     echo json_encode($r, JSON_UNESCAPED_UNICODE);
 }
 
+// ── BODY JSON ────────────────────────────────────────────
+function body(): array {
+    return json_decode(file_get_contents("php://input"), true) ?? [];
+}
+
 // ── AUTH ────────────────────────────────────────────────
 function isAdmin(): bool {
-    return isset($_SESSION['admin']);
+    return isset($_SESSION["admin"]);
 }
 
 function requireAdmin(): void {
     if (!isAdmin()) {
-        out(false, 'No autorizado', null, 401);
+        out(false, "No autorizado", null, 401);
         exit;
     }
 }
 
-function body(): array {
-    return json_decode(file_get_contents('php://input'), true) ?? [];
-}
-
-// ── LOGIN ADMIN ─────────────────────────────────────────
-$auth = $_GET['auth'] ?? null;
+// ── LOGIN / LOGOUT / CREATE ADMIN ───────────────────────
+$auth = $_GET["auth"] ?? null;
 
 if ($auth) {
-    routeAuth($auth);
+    dbAuth($auth);
     exit;
 }
 
-function routeAuth(string $accion): void {
+function dbAuth(string $auth): void {
     $db = db();
 
-    if ($accion === 'login' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    // LOGIN
+    if ($auth === "login" && $_SERVER["REQUEST_METHOD"] === "POST") {
         $d = body();
 
-        if (empty($d['username']) || empty($d['password'])) {
-            out(false, 'Faltan datos', null, 422);
+        if (empty($d["username"]) || empty($d["password"])) {
+            out(false, "Faltan datos", null, 422);
             return;
         }
 
-        $s = $db->prepare("SELECT * FROM admin_users WHERE username = ?");
-        $s->execute([trim($d['username'])]);
-        $user = $s->fetch();
+        $s = $db->prepare("SELECT * FROM admin_users WHERE username=?");
+        $s->execute([$d["username"]]);
+        $u = $s->fetch();
 
-        if (!$user || !password_verify($d['password'], $user['password'])) {
-            out(false, 'Credenciales incorrectas', null, 401);
+        if (!$u || !password_verify($d["password"], $u["password"])) {
+            out(false, "Credenciales incorrectas", null, 401);
             return;
         }
 
-        $_SESSION['admin'] = [
-            'id' => $user['id'],
-            'username' => $user['username']
-        ];
+        $_SESSION["admin"] = $u["username"];
 
-        out(true, 'Login exitoso', [
-            'username' => $user['username']
-        ]);
+        out(true, "Login correcto", ["user" => $u["username"]]);
         return;
     }
 
-    if ($accion === 'logout') {
+    // LOGOUT
+    if ($auth === "logout") {
         session_destroy();
-        out(true, 'Sesión cerrada');
+        out(true, "Sesión cerrada");
         return;
     }
 
-    out(false, 'Acción inválida', null, 400);
+    // CREAR ADMIN (SOLO SI YA ESTÁ LOGUEADO)
+    if ($auth === "create_admin" && $_SERVER["REQUEST_METHOD"] === "POST") {
+        requireAdmin();
+
+        $d = body();
+
+        if (empty($d["username"]) || empty($d["password"])) {
+            out(false, "Faltan datos", null, 422);
+            return;
+        }
+
+        $hash = password_hash($d["password"], PASSWORD_DEFAULT);
+
+        $s = $db->prepare("INSERT INTO admin_users (username, password) VALUES (?, ?)");
+        $s->execute([
+            trim($d["username"]),
+            $hash
+        ]);
+
+        out(true, "Admin creado");
+        return;
+    }
+
+    out(false, "Acción inválida", null, 400);
 }
 
-// ── ROUTER ───────────────────────────────────────────────
-$tabla  = $_GET['tabla'] ?? '';
-$accion = $_GET['accion'] ?? 'listar';
-$id     = isset($_GET['id']) ? (int)$_GET['id'] : null;
-$method = $_SERVER['REQUEST_METHOD'];
+// ── ROUTER PRINCIPAL ────────────────────────────────────
+$tabla  = $_GET["tabla"] ?? "";
+$accion = $_GET["accion"] ?? "listar";
+$id     = isset($_GET["id"]) ? (int)$_GET["id"] : null;
+$method = $_SERVER["REQUEST_METHOD"];
 
 try {
     match(true) {
-        $tabla === 'productos'  => routeProductos($accion, $id, $method),
-        $tabla === 'categorias' => routeCategorias($accion, $id, $method),
-        $tabla === 'clientes'   => routeClientes($accion, $id, $method),
-        $tabla === 'opiniones'  => routeOpiniones($accion, $id, $method),
-        $tabla === 'compras'    => routeCompras($accion, $id, $method),
-        $tabla === 'stats'      => routeStats($accion, $method),
-        default                 => out(false, 'Tabla no válida', null, 400)
+        $tabla === "productos"  => productos($accion, $id, $method),
+        $tabla === "categorias" => categorias($accion, $id, $method),
+        $tabla === "clientes"   => clientes($accion, $id, $method),
+        $tabla === "opiniones"  => opiniones($accion, $id, $method),
+        $tabla === "compras"    => compras($accion, $id, $method),
+        $tabla === "stats"      => stats($accion, $method),
+        default => out(false, "Tabla inválida", null, 400)
     };
 } catch (PDOException $e) {
-    out(false, 'Error de base de datos: ' . $e->getMessage(), null, 500);
+    out(false, $e->getMessage(), null, 500);
 }
 
-// ════════════════════════════════════════════════════════════
-//  PRODUCTOS
-// ════════════════════════════════════════════════════════════
-function routeProductos(string $accion, ?int $id, string $method): void {
+// ── PRODUCTOS ───────────────────────────────────────────
+function productos($accion, $id, $method) {
     $db = db();
 
-    if ($accion === 'listar' && $method === 'GET') {
+    if ($accion === "listar") {
         $s = $db->query("SELECT * FROM productos");
-        out(true, '', $s->fetchAll());
+        out(true, "", $s->fetchAll());
         return;
     }
 
-    if ($accion === 'crear' && $method === 'POST') {
+    if ($accion === "crear") {
         requireAdmin();
         $d = body();
 
         $s = $db->prepare("INSERT INTO productos (nombre, precio) VALUES (?, ?)");
-        $s->execute([$d['nombre'], $d['precio']]);
+        $s->execute([$d["nombre"], $d["precio"]]);
 
-        out(true, 'Producto creado');
+        out(true, "Producto creado");
         return;
     }
-
-    out(false, 'Acción no válida', null, 400);
 }
 
-// ════════════════════════════════════════════════════════════
-//  CATEGORIAS
-// ════════════════════════════════════════════════════════════
-function routeCategorias(string $accion, ?int $id, string $method): void {
+// ── CATEGORIAS ──────────────────────────────────────────
+function categorias($a,$id,$m){
+    requireAdmin();
+    $db = db();
+    out(true,"",$db->query("SELECT * FROM categorias")->fetchAll());
+}
+
+// ── CLIENTES ────────────────────────────────────────────
+function clientes($a,$id,$m){
+    requireAdmin();
+    $db = db();
+    out(true,"",$db->query("SELECT * FROM clientes")->fetchAll());
+}
+
+// ── OPINIONES ───────────────────────────────────────────
+function opiniones($a,$id,$m){
+    requireAdmin();
+    $db = db();
+    out(true,"",$db->query("SELECT * FROM opiniones")->fetchAll());
+}
+
+// ── COMPRAS ─────────────────────────────────────────────
+function compras($a,$id,$m){
+    requireAdmin();
+    $db = db();
+    out(true,"",$db->query("SELECT * FROM compras")->fetchAll());
+}
+
+// ── STATS ───────────────────────────────────────────────
+function stats($a,$m){
     requireAdmin();
     $db = db();
 
-    $s = $db->query("SELECT * FROM categorias");
-    out(true, '', $s->fetchAll());
-}
-
-// ════════════════════════════════════════════════════════════
-//  CLIENTES
-// ════════════════════════════════════════════════════════════
-function routeClientes(string $accion, ?int $id, string $method): void {
-    requireAdmin();
-    $db = db();
-
-    $s = $db->query("SELECT * FROM clientes");
-    out(true, '', $s->fetchAll());
-}
-
-// ════════════════════════════════════════════════════════════
-//  OPINIONES
-// ════════════════════════════════════════════════════════════
-function routeOpiniones(string $accion, ?int $id, string $method): void {
-    requireAdmin();
-    $db = db();
-
-    $s = $db->query("SELECT * FROM opiniones");
-    out(true, '', $s->fetchAll());
-}
-
-// ════════════════════════════════════════════════════════════
-//  COMPRAS
-// ════════════════════════════════════════════════════════════
-function routeCompras(string $accion, ?int $id, string $method): void {
-    requireAdmin();
-    $db = db();
-
-    $s = $db->query("SELECT * FROM compras");
-    out(true, '', $s->fetchAll());
-}
-
-// ════════════════════════════════════════════════════════════
-//  STATS
-// ════════════════════════════════════════════════════════════
-function routeStats(string $accion, string $method): void {
-    requireAdmin();
-    $db = db();
-
-    $productos = $db->query("SELECT COUNT(*) FROM productos")->fetchColumn();
-    $clientes  = $db->query("SELECT COUNT(*) FROM clientes")->fetchColumn();
-    $compras   = $db->query("SELECT COUNT(*) FROM compras")->fetchColumn();
-
-    out(true, '', [
-        'productos' => (int)$productos,
-        'clientes'  => (int)$clientes,
-        'compras'   => (int)$compras
+    out(true,"",[
+        "productos"=>$db->query("SELECT COUNT(*) FROM productos")->fetchColumn(),
+        "clientes"=>$db->query("SELECT COUNT(*) FROM clientes")->fetchColumn(),
+        "compras"=>$db->query("SELECT COUNT(*) FROM compras")->fetchColumn()
     ]);
 }
 ?>
